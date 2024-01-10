@@ -32,6 +32,7 @@ int main()
         close(pipefd[0]);
 
         /* 子进程 写 */
+        sleep(5);
         int num = 200;
         write(pipefd[1], (void *)&num, sizeof(int));
 
@@ -51,14 +52,45 @@ int main()
 
         /* 关闭写端 */
         close(pipefd[1]);
-
+#if 1
         /* 父进程 读 */
-        int readNum = 0;
-        read(pipefd[0], (void *)&readNum, sizeof(int));
 
-        printf("parent process : readNum:%d\n", readNum);
+        /* 把read设置成非阻塞 */
+        
+        
+        /* 1. 拿到当前文件描述符的标记 */
+        int flag = fcntl(pipefd[0], F_GETFL);
+        // printf("flag: %d\n", flag);
+        /* 2. 或上O_NONBLOCK */
+#if 0
+        flag = flag | O_NONBLOCK;
+#else
+        flag |= O_NONBLOCK;
+        // printf("flag: %d\n", flag);
+#endif
+        /* 3. 用新的标记设置文件描述符 */
+        int ret = fcntl(pipefd[0], F_SETFL, flag);
+        if (ret == -1)
+        {
+            perror("fcntl setfd error");
+            /* 关闭读端 */
+            close(pipefd[0]);
+            _exit(0);
+        }
+
+        int readNum = 0;
+        int bytes = read(pipefd[0], (void *)&readNum, sizeof(int));
+        printf("bytes:%d\n", bytes);
+        // printf("parent process : readNum:%d\n", readNum);
+#endif  
 
         /* 关闭读端 */
         close(pipefd[0]);
+        _exit(0);
+    }
+
+    while (1)
+    {
+        sleep(3);
     }
 }
