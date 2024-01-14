@@ -31,6 +31,8 @@ struct threadPool_t
 {
     /* 任务队列 -- 将之设计成循环队列 */
     struct task_t * taskQueue;
+    /* 任务队列容量 */
+    int queueCapacity;
     /* 任务队列任务数大小 */
     int queueSize;
     /* 任务队列的头 */
@@ -51,6 +53,16 @@ struct threadPool_t
     int busyThreadNums;
     /* 存活的线程数 */
     int liveThreadNums;
+
+    /* 锁 - 锁住这个线程池内部的属性 */
+    pthread_mutex_t mutexPool;
+    /* 锁 - 锁住忙线程的属性 */
+    pthread_mutex_t mutexBusy;
+
+    /* 条件变量 - 消费者向生产者发送 目的: 可以继续生产 */
+    pthread_cond_t notFull;
+    /* 条件变量 - 生产者向消费者发送 目的: 可以继续消费 */
+    pthread_cond_t notEmpty;
 };
 
 /* 静态函数前置声明 */
@@ -71,7 +83,7 @@ static void * manager_Hander(void *arg)
 
 
 /* 初始化线程池 */
-int threadPoolInit(threadPool_t * pool, int minThreadNums, int maxThreadNums, int taskQueueSize)
+int threadPoolInit(threadPool_t * pool, int minThreadNums, int maxThreadNums, int taskQueueCapacity)
 {
     if (pool == NULL)
     {
@@ -89,14 +101,17 @@ int threadPoolInit(threadPool_t * pool, int minThreadNums, int maxThreadNums, in
         }
         
         /* 判断合法性 */
-        if (taskQueueSize < 0) 
+        if (taskQueueCapacity < 0) 
         {
-            taskQueueSize = DEFAULT_MAX_QUEUES;
+            taskQueueCapacity = DEFAULT_MAX_QUEUES;
         }
 
         pool->minThreads = minThreadNums;
         pool->maxThreads = maxThreadNums;
-        pool->queueSize = taskQueueSize;
+        /* 队列的容量 */
+        pool->queueCapacity = taskQueueCapacity;
+        /* 队列任务数大小 */
+        pool->queueSize = 0;
 
         /* 任务队列 */
         pool->taskQueue = (struct task_t *)malloc(sizeof(struct task_t) * (pool->queueSize));
@@ -140,6 +155,25 @@ int threadPoolInit(threadPool_t * pool, int minThreadNums, int maxThreadNums, in
         }
         pool->liveThreadNums = minThreadNums;
         pool->busyThreadNums = 0;
+        
+
+        if (
+            pthread_mutex_init(&(pool->mutexPool), NULL) != 0 || 
+            pthread_mutex_init(&(pool->mutexBusy), NULL) != 0
+            )
+        {
+            perror("mutex error ");
+            break;
+        }
+
+        if (
+            pthread_cond_init(&(pool->notFull), NULL) != 0    || 
+            pthread_cond_init(&(pool->notEmpty), NULL) != 0
+        )
+        {
+            perror("cond error ");
+            break;
+        }
 
         return ON_SUCCESS;
     }while (0);
@@ -174,5 +208,46 @@ int threadPoolInit(threadPool_t * pool, int minThreadNums, int maxThreadNums, in
     {
         pthread_join(pool->managerThread, NULL);
     }
+
+    /* 释放锁和条件变量 */
+    pthread_mutex_destroy(&pool->mutexBusy);
+    pthread_mutex_destroy(&pool->mutexPool);
+    pthread_cond_destroy(&(pool->notEmpty));
+    pthread_cond_destroy(&(pool->notFull));
+
     return UNKNOWN_ERROR;
+}
+
+/* 添加任务 */
+/* 本质上是生产者 */
+int threadPoolAddTask(threadPool_t * pool, void *(*worker_hander)(void * arg), void *arg)
+{
+    if (pool == NULL)
+    {
+        return NULL_PTR;
+    }
+
+    /* 加锁 */
+    pthread_mutex_lock(&(pool->mutexPool));
+    /* 任务队列满了 */
+    while (pool->queueSize == pool->queueCapacity)
+    {
+        /* 等待条件变量 : 不满的条件变量 */
+        pthread_cond_wait(&(pool->notFull), &(pool->mutexPool));
+    }
+
+    struct task_t *newTask = malloc(sizeof(struct task_t) * 1);
+    /* 清除脏数据 */
+    memset(newTask, 0, sizeof(struct task_t) * 1);
+    newTask->worker_hander = worker_hander;
+    newTask->arg = arg;
+
+    /* 将新的任务 添加到任务队列中 */
+    pool->taskQueue[pool->queueRear++] = newTask;
+    pool->queueSize++;
+
+    pthread_mutex_unlock(&(pool->mutexPool));
+    pthread_cond_signal(&(pool->notEmpty));
+
+    return ON_SUCCESS;
 }

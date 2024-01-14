@@ -8,7 +8,7 @@ typedef struct threadPool_t threadPool_t;
 
 
 /* 初始化线程池 */
-int threadPoolInit(threadPool_t * pool, int minThreadNums, int maxThreadNums, int taskQueueSize);
+int threadPoolInit(threadPool_t * pool, int minThreadNums, int maxThreadNums, int taskQueueCapacity);
 
 /* 销毁线程池 */
 int threadPoolDestroy(threadPool_t * pool);
