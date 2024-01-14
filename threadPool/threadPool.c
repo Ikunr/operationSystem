@@ -67,6 +67,9 @@ struct threadPool_t
     pthread_cond_t notFull;
     /* 条件变量 - 生产者向消费者发送 目的: 可以继续消费 */
     pthread_cond_t notEmpty;
+
+    /* 关闭 */
+    int shoudown;
 };
 
 /* 静态函数前置声明 */
@@ -77,7 +80,7 @@ static int pthreadExitClearThreadIndex(threadPool_t *pool)
 {
     int ret = 0;
 
-    /* 需要判断当前进程是在数组threads对应的哪一个索引里面. */
+    /* 需要判断当前线程是在数组threads对应的哪一个索引里面. */
     for (int idx = 0; idx < pool->maxThreads; idx++)
     {
         if (pool->threadIds[idx] == pthread_self())
@@ -99,7 +102,7 @@ static void * thread_Hander(void *arg)
     {
         pthread_mutex_lock(&(pool->mutexPool));
         /* 没有任务消费的时候 */
-        while (pool->queueSize == 0)
+        while (pool->queueSize == 0 && pool->shoudown == 0)
         {
             pthread_cond_wait(&(pool->notEmpty), &(pool->mutexPool));
 
@@ -107,12 +110,27 @@ static void * thread_Hander(void *arg)
             {
                 /* 需要销毁的线程数减一. */
                 pool->exitThreadNums--;
-                /* 解锁 */
-                pthread_mutex_unlock(&(pool->mutexPool));
-                
-                pthreadExitClearThreadIndex(pool);
-                // pthread_exit(NULL);
+
+                if (pool->liveThreadNums > pool->minThreads)
+                {
+                    /* 活着的线程数减一 */
+                    pool->liveThreadNums--;
+                    /* 解锁 */
+                    pthread_mutex_unlock(&(pool->mutexPool));
+                    pthreadExitClearThreadIndex(pool);
+                    // pthread_exit(NULL);
+                }
+            
             }
+        }
+
+        /* 销毁线程池 标识位置1. */
+        if (pool->shoudown == 1)
+        {
+            /* 解锁 */
+            pthread_mutex_unlock(&(pool->mutexPool));
+            /* 线程退出 */
+            pthreadExitClearThreadIndex(pool);
         }
 
         /* 从任务队列中取数据 -- 从队列的对头取数据 */
@@ -136,7 +154,6 @@ static void * thread_Hander(void *arg)
         /* 忙碌的线程数加一. */
         pool->busyThreadNums--;
         pthread_mutex_unlock(&(pool->mutexBusy));
-
     }
 
     
@@ -146,7 +163,7 @@ static void * manager_Hander(void *arg)
 {
     threadPool_t *pool = (threadPool_t * )arg;
 
-    while (1)
+    while (pool->shoudown != 1)
     {
         sleep(3);
         pthread_mutex_lock(&(pool->mutexPool));
@@ -293,6 +310,8 @@ int threadPoolInit(threadPool_t * pool, int minThreadNums, int maxThreadNums, in
             break;
         }
 
+        /* 销毁线程池 标识位置0. */
+        pool->shoudown = 0;
         return ON_SUCCESS;
     }while (0);
     
@@ -348,10 +367,16 @@ int threadPoolAddTask(threadPool_t * pool, void *(*worker_hander)(void * arg), v
     /* 加锁 */
     pthread_mutex_lock(&(pool->mutexPool));
     /* 任务队列满了 */
-    while (pool->queueSize == pool->queueCapacity)
+    while (pool->queueSize == pool->queueCapacity && pool->shoudown == 0)
     {
         /* 等待条件变量 : 不满的条件变量 */
         pthread_cond_wait(&(pool->notFull), &(pool->mutexPool));
+    }
+
+    if (pool->shoudown != 0)
+    {
+        pthread_mutex_unlock(&(pool->mutexPool));
+        return ON_SUCCESS;
     }
 
     /* 将新的任务 添加到任务队列中 */
@@ -364,6 +389,51 @@ int threadPoolAddTask(threadPool_t * pool, void *(*worker_hander)(void * arg), v
 
     pthread_mutex_unlock(&(pool->mutexPool));
     pthread_cond_signal(&(pool->notEmpty));
+
+    return ON_SUCCESS;
+}
+
+
+int threadPoolDestroy(threadPool_t * pool)
+{
+    if (pool == NULL)
+    {
+        return NULL_PTR;
+    }
+
+    pool->shoudown = 1;
+
+    /* 阻塞回收管理者线程 */
+    pthread_join(pool->managerThread, NULL);
+    /* 唤醒阻塞的消费者线程 */
+    for (int idx = 0; idx < pool->liveThreadNums; idx++)
+    {
+        pthread_cond_signal(&(pool->notEmpty));
+    }
+
+    /* 释放堆空间 */
+    if (pool->taskQueue)
+    {
+        free(pool->taskQueue);
+        pool->taskQueue = NULL;
+    }
+
+    if (pool->threadIds)
+    {
+        free(pool->threadIds);
+        pool->threadIds = NULL;
+    }
+
+    pthread_mutex_destroy(&(pool->mutexPool));
+    pthread_mutex_destroy(&(pool->mutexBusy));
+    pthread_cond_destroy(&(pool->notEmpty));
+    pthread_cond_destroy(&(pool->notFull));
+
+    if (pool)
+    {
+        free(pool);
+        pool = NULL;
+    }
 
     return ON_SUCCESS;
 }
