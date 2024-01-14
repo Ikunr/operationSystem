@@ -73,41 +73,73 @@ struct threadPool_t
 static void * thread_Hander(void *arg);
 static void * manager_Hander(void *arg);
 
+static int pthreadExitClearThreadIndex(threadPool_t *pool)
+{
+    int ret = 0;
+
+    /* 需要判断当前进程是在数组threads对应的哪一个索引里面. */
+    for (int idx = 0; idx < pool->maxThreads; idx++)
+    {
+        if (pool->threadIds[idx] == pthread_self())
+        {
+            /* 将需要退出的线程 对应的索引清空. */
+            pool->threadIds[idx] = 0;
+            break;
+        }
+    }
+    pthread_exit(NULL);
+    return ret;
+}
 /* 本质是一个消费者函数 */
 static void * thread_Hander(void *arg)
 {
     threadPool_t *pool = (threadPool_t * )arg;
 
-    pthread_mutex_lock(&(pool->mutexPool));
-    /* 没有任务消费的时候 */
-    while (pool->queueSize == 0)
+    while (1)
     {
-        pthread_cond_wait(&(pool->notEmpty), &(pool->mutexPool));
+        pthread_mutex_lock(&(pool->mutexPool));
+        /* 没有任务消费的时候 */
+        while (pool->queueSize == 0)
+        {
+            pthread_cond_wait(&(pool->notEmpty), &(pool->mutexPool));
+
+            if (pool->exitThreadNums > 0)
+            {
+                /* 需要销毁的线程数减一. */
+                pool->exitThreadNums--;
+                /* 解锁 */
+                pthread_mutex_unlock(&(pool->mutexPool));
+                
+                pthreadExitClearThreadIndex(pool);
+                // pthread_exit(NULL);
+            }
+        }
+
+        /* 从任务队列中取数据 -- 从队列的对头取数据 */
+        task_t task = pool->taskQueue[pool->queueFront];
+        /* 任务队列的任务数减一. */
+        pool->queueSize--;
+        /* front 向后移动. */
+        pool->queueFront = (pool->queueFront + 1) % pool->queueCapacity;
+        pthread_mutex_unlock(&(pool->mutexPool));
+        pthread_cond_signal(&(pool->notFull));
+
+        pthread_mutex_lock(&(pool->mutexBusy));
+        /* 忙碌的线程数加一. */
+        pool->busyThreadNums++;
+        pthread_mutex_unlock(&(pool->mutexBusy));
+
+        /* 执行处理函数 */
+        task.worker_hander(task.arg);
+
+        pthread_mutex_lock(&(pool->mutexBusy));
+        /* 忙碌的线程数加一. */
+        pool->busyThreadNums--;
+        pthread_mutex_unlock(&(pool->mutexBusy));
+
     }
 
-    /* 从任务队列中取数据 -- 从队列的对头取数据 */
-    task_t task = pool->taskQueue[pool->queueFront];
-    /* 任务队列的任务数减一. */
-    pool->queueSize--;
-    /* front 向后移动. */
-    pool->queueFront = (pool->queueFront + 1) % pool->queueCapacity;
-    pthread_mutex_unlock(&(pool->mutexPool));
-    pthread_cond_signal(&(pool->notFull));
-
-    pthread_mutex_lock(&(pool->mutexBusy));
-    /* 忙碌的线程数加一. */
-    pool->busyThreadNums++;
-    pthread_mutex_unlock(&(pool->mutexBusy));
-
-    /* 执行处理函数 */
-    task.worker_hander(task.arg);
-
-    pthread_mutex_lock(&(pool->mutexBusy));
-    /* 忙碌的线程数加一. */
-    pool->busyThreadNums--;
-    pthread_mutex_unlock(&(pool->mutexBusy));
-
-    pthread_exit(NULL);
+    
 }
 
 static void * manager_Hander(void *arg)
