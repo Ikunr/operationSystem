@@ -1,7 +1,9 @@
 #include "threadPool.h"
 #include <pthread.h>
 #include <stdlib.h>
+#include <unistd.h>
 
+#define NUMBER  2
 /* 状态码 */
 enum STATUS_CODE
 {
@@ -53,6 +55,8 @@ struct threadPool_t
     int busyThreadNums;
     /* 存活的线程数 */
     int liveThreadNums;
+    /* 销毁的线程数 */
+    int exitThreadNums;
 
     /* 锁 - 锁住这个线程池内部的属性 */
     pthread_mutex_t mutexPool;
@@ -88,7 +92,7 @@ static void * thread_Hander(void *arg)
     /* front 向后移动. */
     pool->queueFront = (pool->queueFront + 1) % pool->queueCapacity;
     pthread_mutex_unlock(&(pool->mutexPool));
-
+    pthread_cond_signal(&(pool->notFull));
 
     pthread_mutex_lock(&(pool->mutexBusy));
     /* 忙碌的线程数加一. */
@@ -108,6 +112,58 @@ static void * thread_Hander(void *arg)
 
 static void * manager_Hander(void *arg)
 {
+    threadPool_t *pool = (threadPool_t * )arg;
+
+    while (1)
+    {
+        sleep(3);
+        pthread_mutex_lock(&(pool->mutexPool));
+        int liveThreadNums = pool->liveThreadNums;
+        int queueSize = pool->queueSize;
+        pthread_mutex_unlock(&(pool->mutexPool));
+
+        pthread_mutex_lock(&(pool->mutexBusy));
+        int busyThreadNums = pool->busyThreadNums;
+        pthread_mutex_unlock(&(pool->mutexBusy));
+
+        /* 扩大线程池中线程的容量 */
+        /* 任务的个数 > 存活的线程个数 && 存活的线程数 < 最大线程数 */
+        if (queueSize > liveThreadNums && liveThreadNums < pool->maxThreads)
+        {   
+            int count = 0;
+            /* 加锁 */
+            pthread_mutex_lock(&(pool->mutexPool));
+            for (int idx = 0; idx < pool->maxThreads && count < NUMBER
+                    && pool->liveThreadNums < pool->maxThreads; idx++)
+            {
+                if (pool->threadIds[idx] == 0)
+                {
+                    pthread_create(&(pool->threadIds[idx]), NULL, thread_Hander, pool);
+                    count++;
+                    /* 更新线程池存活的线程数 */
+                    pool->liveThreadNums++;
+                }
+            }
+            /* 解锁 */
+            pthread_mutex_unlock(&(pool->mutexPool));
+        }
+
+        /* 缩小线程池中线程的容量 */
+        /* 忙的线程数 * 2 < 存活的线程数 && 存活的线程 > 最小线程数 */
+        if (busyThreadNums * 2 < liveThreadNums && liveThreadNums > pool->minThreads)
+        {
+            pthread_mutex_lock(&(pool->mutexPool));
+            pool->exitThreadNums = NUMBER;
+            pthread_mutex_unlock(&(pool->mutexPool));
+
+            /* 唤醒等待工作的线程 -- 等待工作的线程就是空闲的线程 */
+            for (int idx = 0; idx < NUMBER; idx++)
+            {
+                /* 发送信号. */
+                pthread_cond_signal(&(pool->notEmpty));
+            }
+        }
+    }
     
 }
 
