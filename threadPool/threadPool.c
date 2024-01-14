@@ -72,13 +72,43 @@ static void * manager_Hander(void *arg);
 /* 本质是一个消费者函数 */
 static void * thread_Hander(void *arg)
 {
+    threadPool_t *pool = (threadPool_t * )arg;
+
+    pthread_mutex_lock(&(pool->mutexPool));
+    /* 没有任务消费的时候 */
+    while (pool->queueSize == 0)
+    {
+        pthread_cond_wait(&(pool->notEmpty), &(pool->mutexPool));
+    }
+
+    /* 从任务队列中取数据 -- 从队列的对头取数据 */
+    task_t task = pool->taskQueue[pool->queueFront];
+    /* 任务队列的任务数减一. */
+    pool->queueSize--;
+    /* front 向后移动. */
+    pool->queueFront = (pool->queueFront + 1) % pool->queueCapacity;
+    pthread_mutex_unlock(&(pool->mutexPool));
+
+
+    pthread_mutex_lock(&(pool->mutexBusy));
+    /* 忙碌的线程数加一. */
+    pool->busyThreadNums++;
+    pthread_mutex_unlock(&(pool->mutexBusy));
+
+    /* 执行处理函数 */
+    task.worker_hander(task.arg);
+
+    pthread_mutex_lock(&(pool->mutexBusy));
+    /* 忙碌的线程数加一. */
+    pool->busyThreadNums--;
+    pthread_mutex_unlock(&(pool->mutexBusy));
 
     pthread_exit(NULL);
 }
 
 static void * manager_Hander(void *arg)
 {
-
+    
 }
 
 
@@ -138,7 +168,7 @@ int threadPoolInit(threadPool_t * pool, int minThreadNums, int maxThreadNums, in
         /* 工作线程的创建 */
         for (int idx = 0; idx < pool->minThreads; idx++)
         {   
-            ret = pthread_create(&(pool->threadIds[idx]), NULL, thread_Hander, NULL);
+            ret = pthread_create(&(pool->threadIds[idx]), NULL, thread_Hander, (void *)pool);
             if (ret != 0)
             {
                 perror("pthread create error");
@@ -147,7 +177,7 @@ int threadPoolInit(threadPool_t * pool, int minThreadNums, int maxThreadNums, in
         }
 
         /* 管理者线程的创建 */
-        ret = pthread_create(&pool->managerThread, NULL, manager_Hander, NULL);
+        ret = pthread_create(&pool->managerThread, NULL, manager_Hander, (void *)pool);
         if (ret != 0)
         {
             perror("pthread create error");
