@@ -236,15 +236,13 @@ int threadPoolAddTask(threadPool_t * pool, void *(*worker_hander)(void * arg), v
         pthread_cond_wait(&(pool->notFull), &(pool->mutexPool));
     }
 
-    struct task_t *newTask = malloc(sizeof(struct task_t) * 1);
-    /* 清除脏数据 */
-    memset(newTask, 0, sizeof(struct task_t) * 1);
-    newTask->worker_hander = worker_hander;
-    newTask->arg = arg;
-
     /* 将新的任务 添加到任务队列中 */
-    pool->taskQueue[pool->queueRear++] = newTask;
+    pool->taskQueue[pool->queueRear].worker_hander = worker_hander;
+    pool->taskQueue[pool->queueRear].arg = arg;
+    /* 任务个数加一 */
     pool->queueSize++;
+    /* 该队列是循环队列 -- 要让此索引循环起来. */
+    pool->queueRear = (pool->queueRear + 1) % pool->queueCapacity;
 
     pthread_mutex_unlock(&(pool->mutexPool));
     pthread_cond_signal(&(pool->notEmpty));
