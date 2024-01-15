@@ -8,7 +8,7 @@
 
 /* 线程独享栈空间 */
 
-void *thread_func1(void * arg)
+void * thread_func1(void * arg)
 {
     int num = *(int *)arg;
     printf("thread1 num:%d\n", num);
@@ -18,7 +18,7 @@ void *thread_func1(void * arg)
     pthread_exit(NULL);
 }
 
-void *thread_func2(void * arg)
+void * thread_func2(void * arg)
 {
     sleep(1);
     int num = *(int *)arg;
