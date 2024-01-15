@@ -61,6 +61,8 @@ static void * threadHander(void *arg)
                 pool->exitThreadNums--;
                 if (pool->liveThreadNums > pool->minThreads)
                 {
+                    /* 解锁 -- 避免死锁 */
+                    pthread_mutex_unlock(&(pool->mutexpool));
                     /* 线程退出 */
                     threadExitClrResources(pool);
                 }
@@ -69,6 +71,8 @@ static void * threadHander(void *arg)
 
         if (pool->shutDown)
         {
+            /* 解锁 -- 避免死锁 */
+            pthread_mutex_unlock(&(pool->mutexpool));
             /* 线程退出 */
             threadExitClrResources(pool);
         }
@@ -123,8 +127,6 @@ static void * managerHander(void *arg)
         int busyThreadNums = pool->busyThreadNums;
         pthread_mutex_unlock(&pool->mutexBusy);
         
-
-
         /* 扩容: 扩大线程池里面的线程数 (上限不要超过maxThreads) */
         /* 任务队列任务数 > 存活的线程数 && 存活的线程数 < maxThreads */
         if (taskNums > liveThreadNums && liveThreadNums < pool->maxThreads)
@@ -174,12 +176,14 @@ static void * managerHander(void *arg)
 
             /* 离开的线程数 */
             pool->exitThreadNums = DEFAULT_VARY_THREADS;
+            /* 这边解锁 -- 减少锁的粒度. */
+            pthread_mutex_unlock(&(pool->mutexpool));
+
             for (int idx = 0; idx < DEFAULT_VARY_THREADS; idx++)
             {
                 /* 发一个信号 */
                 pthread_cond_signal(&(pool->notEmpty));
             }
-            pthread_mutex_unlock(&(pool->mutexpool));
         }
 
     }
