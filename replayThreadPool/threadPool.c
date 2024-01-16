@@ -88,16 +88,17 @@ static void * threadHander(void *arg)
         /* 发一个信号给生产者 告诉他可以继续生产. */
         pthread_cond_signal(&pool->notFull);
 
-
         /* 为了提升我们性能, 再创建一把只维护busyNum属性的锁. */
         pthread_mutex_lock(&pool->mutexBusy);
         pool->busyThreadNums++;
         pthread_mutex_unlock(&pool->mutexBusy);
+        printf("thread %ld start working...\n", pthread_self());
 
         /* 执行钩子函数 - 回调函数. */
         tmpTask.worker_hander(tmpTask.arg);
         /* 释放堆空间 todo... */
 
+        printf("thread %ld end working...\n", pthread_self());
         pthread_mutex_lock(&pool->mutexBusy);
         pool->busyThreadNums--;
         pthread_mutex_unlock(&pool->mutexBusy);
