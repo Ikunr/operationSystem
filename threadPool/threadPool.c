@@ -96,6 +96,7 @@ static void * thread_Hander(void *arg)
         pthread_mutex_unlock(&(pool->mutexPool));
         pthread_cond_signal(&(pool->notFull));
 
+        printf("thread %ld start working...\n", pthread_self());
         pthread_mutex_lock(&(pool->mutexBusy));
         /* 忙碌的线程数加一. */
         pool->busyThreadNums++;
@@ -104,6 +105,7 @@ static void * thread_Hander(void *arg)
         /* 执行处理函数 */
         task.worker_hander(task.arg);
 
+        printf("thread %ld end working...\n", pthread_self());
         pthread_mutex_lock(&(pool->mutexBusy));
         /* 忙碌的线程数加一. */
         pool->busyThreadNums--;
