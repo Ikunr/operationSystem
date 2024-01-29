@@ -46,7 +46,7 @@ void log_init()
         return;
     }
 
-#define DEBUG_FILE "./my_debug.log"
+#define DEBUG_FILE "/var/log/test_main.log"
 
     if ((g_logfp = fopen(DEBUG_FILE, "a")) == NULL)
     {
