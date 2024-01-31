@@ -4,6 +4,7 @@
 #include <error.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
 
 #define DEFAULT_MIN_THREADS     5
 #define DEFAULT_MAX_THREADS     10
@@ -27,7 +28,21 @@ enum STATUS_CODE
 static void * threadHander(void *arg);
 static void * managerHander(void *arg);
 static int threadExitClrResources(threadpool_t *pool);
+static int is_thread_alive(pthread_t tid);
 
+
+/*线程是否存活*/
+static int threadIsAlive(pthread_t tid)
+{
+    /* 发送0号信号, 测试是否存活 */
+    int kill_rc = pthread_kill(tid, 0);   
+    //线程不存在  
+    if (kill_rc == ESRCH)  
+    {
+        return 0;
+    }
+    return 1;
+}
 
 /* 线程退出清理资源 */
 static int threadExitClrResources(threadpool_t *pool)
@@ -65,12 +80,12 @@ static void * threadHander(void *arg)
                 pool->exitThreadNums--;
                 if (pool->liveThreadNums > pool->minThreads)
                 {
-                    /* 存活的线程是-- */
+                    /* 存活的线程数-- */
                     pool->liveThreadNums--;
                     /* 解锁 -- 避免死锁 */
                     pthread_mutex_unlock(&(pool->mutexpool));
                     /* 线程退出 */
-                    threadExitClrResources(pool);
+                    pthread_exit(NULL);
                 }
             }
         }
@@ -82,7 +97,7 @@ static void * threadHander(void *arg)
             /* 解锁 -- 避免死锁 */
             pthread_mutex_unlock(&(pool->mutexpool));
             /* 线程退出 */
-            threadExitClrResources(pool);
+            pthread_exit(NULL);
         }
 
 
@@ -150,7 +165,7 @@ static void * managerHander(void *arg)
             for (int idx = 0; idx < pool->maxThreads && count < DEFAULT_VARY_THREADS &&liveThreadNums <= pool->maxThreads; idx++)
             {
                 /* 能够用的索引位置 */
-                if (pool->threadIds[idx] == 0)
+                if (pool->threadIds[idx] == 0 || threadIsAlive(pool->threadIds[idx]) == 0)
                 {
                     ret = pthread_create(&(pool->threadIds[idx]), NULL, threadHander, pool);
                     if (ret != 0)
@@ -287,8 +302,11 @@ int threadPoolInit(threadpool_t *pool, int minThreads, int maxThreads, int queue
         pool->liveThreadNums = pool->minThreads;
 
         /* 初始化锁资源 */
-        pthread_mutex_init(&(pool->mutexpool), NULL);
-        pthread_mutex_init(&(pool->mutexBusy), NULL);
+        if (pthread_mutex_init(&(pool->mutexpool), NULL) != 0 || pthread_mutex_init(&(pool->mutexBusy), NULL) != 0)
+        {
+            perror("thread mutex error");
+            break;
+        }
 
         /* 初始化条件变量资源 */
         if (pthread_cond_init(&(pool->notEmpty), NULL) != 0 || pthread_cond_init(&(pool->notFull), NULL) != 0)
@@ -302,14 +320,23 @@ int threadPoolInit(threadpool_t *pool, int minThreads, int maxThreads, int queue
     /* 程序执行到这个地方, 上面一定有失败. */
 
     /* 回收堆空间 */
-    if (pool->taskQueue != NULL)
+    if (pool != NULL && pool->taskQueue != NULL)
     {
         free(pool->taskQueue);
         pool->taskQueue = NULL;
     }
     
+    if (pool && pool->threadIds != NULL)
+    {
+        free(pool->threadIds);
+        pool->threadIds = NULL;
+    }
+
     /* 回收管理着线程资源 */
-    pthread_join(pool->managerThread, NULL);
+    if (pool->managerThread != 0)
+    {   
+        pthread_join(pool->managerThread, NULL);
+    }
 
     /* 回收线程资源 */
     for (int idx = 0; idx < pool->minThreads; idx++)
@@ -319,13 +346,6 @@ int threadPoolInit(threadpool_t *pool, int minThreads, int maxThreads, int queue
             pthread_join(pool->threadIds[idx], NULL);
         }
     }
-
-    if (pool->threadIds != NULL)
-    {
-        free(pool->threadIds);
-        pool->threadIds = NULL;
-    }
-
 
     /* 释放锁资源 */
     pthread_mutex_destroy(&(pool->mutexpool));
@@ -351,9 +371,16 @@ int threadPoolAddTask(threadpool_t *pool, void *(worker_hander)(void *), void *a
     /* 加锁 */
     pthread_mutex_lock(&(pool->mutexpool));
     /* 任务队列满了 */
-    while (pool->queueSize == pool->queueCapacity)
+    while (pool->queueSize == pool->queueCapacity && pool->shutDown == 0)
     {
+        /* 阻塞生产者线程 */
         pthread_cond_wait(&(pool->notFull), &(pool->mutexpool));
+    }
+
+    if (pool->shutDown)
+    {
+        pthread_mutex_unlock(&(pool->mutexpool));
+        return ON_SUCCESS;
     }
     /* 程序到这个地方一定有位置可以放任务 */
     /* 将任务放到队列的队尾 */
@@ -388,13 +415,13 @@ int threadPoolDestroy(threadpool_t *pool)
 
 
     /* 释放堆空间 */
-    if (pool->taskQueue)
+    if (pool && pool->taskQueue)
     {
         free(pool->taskQueue);
         pool->taskQueue = NULL;
     }
 
-    if (pool->threadIds)
+    if (pool && pool->threadIds)
     {
         free(pool->threadIds);
         pool->threadIds = NULL;
