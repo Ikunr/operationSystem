@@ -50,7 +50,7 @@ static void * threadHander(void *arg)
     while (1)
     {
         pthread_mutex_lock(&(pool->mutexpool));
-        while (pool->queueSize == 0 && pool->shutDown != 0)
+        while (pool->queueSize == 0 && pool->shutDown == 0)
         {
             /* 等待一个条件变量. 生产者发送过来的. */
             pthread_cond_wait(&(pool->notEmpty), &(pool->mutexpool));
@@ -61,6 +61,8 @@ static void * threadHander(void *arg)
                 pool->exitThreadNums--;
                 if (pool->liveThreadNums > pool->minThreads)
                 {
+                    /* 存活的线程是-- */
+                    pool->liveThreadNums--;
                     /* 解锁 -- 避免死锁 */
                     pthread_mutex_unlock(&(pool->mutexpool));
                     /* 线程退出 */
@@ -71,6 +73,8 @@ static void * threadHander(void *arg)
 
         if (pool->shutDown)
         {
+            /* 存活的线程是-- */
+            pool->liveThreadNums--;
             /* 解锁 -- 避免死锁 */
             pthread_mutex_unlock(&(pool->mutexpool));
             /* 线程退出 */
@@ -96,7 +100,6 @@ static void * threadHander(void *arg)
 
         /* 执行钩子函数 - 回调函数. */
         tmpTask.worker_hander(tmpTask.arg);
-        /* 释放堆空间 todo... */
 
         printf("thread %ld end working...\n", pthread_self());
         pthread_mutex_lock(&pool->mutexBusy);
@@ -130,7 +133,7 @@ static void * managerHander(void *arg)
         
         /* 扩容: 扩大线程池里面的线程数 (上限不要超过maxThreads) */
         /* 任务队列任务数 > 存活的线程数 && 存活的线程数 < maxThreads */
-        if (taskNums > liveThreadNums && liveThreadNums < pool->maxThreads)
+        if (taskNums > liveThreadNums - busyThreadNums && liveThreadNums < pool->maxThreads)
         {
             pthread_mutex_lock(&(pool->mutexpool));
             /* 计数 */
