@@ -1,5 +1,7 @@
 #include <stdio.h>
 #include "threadPool.h"
+#include <stdlib.h>
+#include <unistd.h>
 
 void * printData(void *arg)
 {
@@ -14,10 +16,15 @@ void * printData(void *arg)
 int main()
 {
     threadpool_t m_p;
-    threadPoolInit(&m_p, 5, 10, 100);
+    threadPoolInit(&m_p, 3, 10, 100);
 
     int *nums = (int *)malloc(sizeof(int) * 100);
-    
+    if (nums == NULL)
+    {
+        perror("malloc error\n");
+        exit(-1);
+    }
+
     for (int idx = 0; idx < 100; idx++)
     {   
         nums[idx] = idx + 100;

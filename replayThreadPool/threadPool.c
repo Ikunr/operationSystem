@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <error.h>
 #include <string.h>
+#include <unistd.h>
 
 #define DEFAULT_MIN_THREADS     5
 #define DEFAULT_MAX_THREADS     10
@@ -406,10 +407,5 @@ int threadPoolDestroy(threadpool_t *pool)
     pthread_cond_destroy(&(pool->notEmpty));
     pthread_cond_destroy(&(pool->notFull));
     
-    if (pool)
-    {
-        free(pool);
-        pool = NULL;
-    }
     return ret;
 }
