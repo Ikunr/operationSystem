@@ -45,6 +45,9 @@ static int threadExitClrResources(threadpool_t *pool)
 /* 本质是一个消费者 */
 static void * threadHander(void *arg)
 {
+    /* 设置线程分离 让系统自动回收资源 */
+    pthread_detach(pthread_self());
+
     /* 强制类型转换. */
     threadpool_t *pool = (threadpool_t *)arg;
     while (1)
@@ -112,6 +115,9 @@ static void * threadHander(void *arg)
 /* 管理者线程 */
 static void * managerHander(void *arg)
 {
+    /* 设置线程分离 让系统自动回收资源 */
+    pthread_detach(pthread_self());
+
     /* 强制类型转换. */
     threadpool_t *pool = (threadpool_t *)arg;
 
@@ -372,9 +378,38 @@ int threadPoolDestroy(threadpool_t *pool)
     /* 标志位 */
     pool->shutDown = 1;
 
-    /* 广播 */
-    pthread_cond_broadcast(&(pool->notEmpty));
+    pthread_mutex_lock(&(pool->mutexpool));
+    for (int idx = 0; idx < pool->liveThreadNums; idx++)
+    {
+        pthread_cond_signal(&(pool->notEmpty));
+    }
+    pthread_mutex_unlock(&(pool->mutexpool));
 
+
+    /* 释放堆空间 */
+    if (pool->taskQueue)
+    {
+        free(pool->taskQueue);
+        pool->taskQueue = NULL;
+    }
+
+    if (pool->threadIds)
+    {
+        free(pool->threadIds);
+        pool->threadIds = NULL;
+    }
     
+    /* 回收锁资源 */
+    pthread_mutex_destroy(&pool->mutexpool);
+    pthread_mutex_destroy(&pool->mutexBusy);
+    /* 回收条件变量资源 */
+    pthread_cond_destroy(&(pool->notEmpty));
+    pthread_cond_destroy(&(pool->notFull));
+    
+    if (pool)
+    {
+        free(pool);
+        pool = NULL;
+    }
     return ret;
 }
