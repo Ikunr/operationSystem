@@ -3,7 +3,10 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <sys/types.h>
+#include <string.h>
+#include <stdlib.h>
 
+#define BUFFERSIZE 20
 int main()
 {
     /* 创建进程 */
@@ -14,6 +17,9 @@ int main()
         exit(-1);
     }
 
+    char buffer[BUFFERSIZE];
+    memset(buffer, 0, sizeof(buffer));
+    
     if (pid == 0)
     {
         /* 子进程 */
