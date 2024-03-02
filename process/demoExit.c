@@ -20,6 +20,7 @@ int main()
     char buffer[BUFFERSIZE];
     memset(buffer, 0, sizeof(buffer));
     
+    
     if (pid == 0)
     {
         /* 子进程 */
